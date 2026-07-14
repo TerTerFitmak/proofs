@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>กองทุนโครงการ · Smart Traffic Light AI</title>
 
-<!-- ====== CONFIG: แก้ 3 บรรทัดนี้หลังสร้างโปรเจกต์ Supabase ====== -->
+<!-- ====== CONFIG ====== -->
 <script>
   window.SUPABASE_URL = "https://ebvmozkglptitvrsodtx.supabase.co";
   window.SUPABASE_ANON_KEY = "sb_publishable_5Xkw2xU1cqYoql7ukH0GuA_zggORt8z";
   window.GROUP_PIN = "88888888";
 </script>
-<!-- ============================================================= -->
+<!-- ==================== -->
 
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -45,7 +45,7 @@ const {
 
 // ---------- Supabase client ----------
 const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
-const BUCKET = "proofs";
+const BUCKET = "prooft";
 const TABLE = "transactions";
 
 // ---------- Palette ----------
@@ -442,7 +442,6 @@ function TxForm(props) {
   }, file ? "เลือกรูปแล้ว" : "แตะเพื่อเลือกรูป / ถ่ายภาพสลิป"), /*#__PURE__*/React.createElement("input", {
     type: "file",
     accept: "image/*",
-    capture: "environment",
     onChange: e => handleFile(e.target.files && e.target.files[0]),
     style: {
       display: "none"
