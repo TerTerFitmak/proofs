@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>กองทุนโครงการ · Smart Traffic Light AI</title>
+
+<!-- ====== CONFIG: แก้ 3 บรรทัดนี้หลังสร้างโปรเจกต์ Supabase ====== -->
+<script>
+  window.SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
+  window.SUPABASE_ANON_KEY = "YOUR-ANON-PUBLIC-KEY";
+  window.GROUP_PIN = ""; // ถ้าอยากใส่รหัสผ่านกลุ่มง่ายๆ ใส่ตัวเลข/ตัวอักษรตรงนี้ เช่น "1234" ปล่อยว่าง = ไม่ล็อก
+</script>
+<!-- ============================================================= -->
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:'Noto Sans Thai',sans-serif; background:#15181B; color:#F2F1EC; }
+  .ft-display { font-family:'Space Grotesk','Noto Sans Thai',sans-serif; }
+  .ft-mono { font-family:'IBM Plex Mono',monospace; }
+  @keyframes ft-pulse { 0%,100%{opacity:1;} 50%{opacity:.45;} }
+  .ft-pulse { animation: ft-pulse 1.8s ease-in-out infinite; }
+  @keyframes ft-fade { from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);} }
+  .ft-fade { animation: ft-fade .35s ease-out both; }
+  input, textarea, button { font-family: inherit; }
+  ::-webkit-scrollbar { width:8px; }
+  ::-webkit-scrollbar-thumb { background:#3A4048; border-radius:4px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback, useRef } = React;
+
+// ---------- Supabase client ----------
+const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+const BUCKET = "proofs";
+const TABLE = "transactions";
+
+// ---------- Palette ----------
+const C = {
+  bg:"#15181B", panel:"#1E2226", panel2:"#252A2F", line:"#31373D",
+  text:"#F2F1EC", sub:"#9AA3AB",
+  green:"#3DDC84", greenDim:"#1F5B3E",
+  red:"#FF5A5F", redDim:"#5C2325",
+  amber:"#FFB020", amberDim:"#5C4416",
+};
+
+const money = (n) => (Number(n)||0).toLocaleString("th-TH",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtDate = (iso) => { if(!iso) return ""; const d=new Date(iso);
+  return d.toLocaleDateString("th-TH",{day:"2-digit",month:"short",year:"2-digit"}) + " " + d.toLocaleTimeString("th-TH",{hour:"2-digit",minute:"2-digit"}); };
+
+// ---------- Simple SVG icons ----------
+const Icon = {
+  plus: (p)=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" {...p}><path d="M12 5v14M5 12h14"/></svg>,
+  in: (p)=><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={C.green} strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12l4 4 4-4"/></svg>,
+  out:(p)=><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={C.red} strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 16V8M8 12l4-4 4 4"/></svg>,
+  img:(p)=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>,
+  trash:(p)=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>,
+  x:(p)=><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>,
+  refresh:(p)=><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 4v6h-6M1 20v-6h6M3.5 9a9 9 0 0114.5-4.5L23 9M1 15l5-4.5A9 9 0 0020.5 15"/></svg>,
+};
+
+function fileToCompressedDataUrl(file, maxDim=1000, quality=0.72) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("อ่านไฟล์ไม่สำเร็จ"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("โหลดรูปไม่สำเร็จ"));
+      img.onload = () => {
+        let {width, height} = img;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) { height = Math.round(height*maxDim/width); width = maxDim; }
+          else { width = Math.round(width*maxDim/height); height = maxDim; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#fff"; ctx.fillRect(0,0,width,height);
+        ctx.drawImage(img,0,0,width,height);
+        canvas.toBlob((blob)=>resolve(blob), "image/jpeg", quality);
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function SignalStack({status}) {
+  const lights = ["red","amber","green"];
+  return (
+    <div className="ft-fade" style={{display:"flex",flexDirection:"column",gap:8,background:"#101315",border:`1px solid ${C.line}`,borderRadius:14,padding:"12px 10px",boxShadow:"inset 0 0 12px rgba(0,0,0,.5)"}}>
+      {lights.map(l=>{
+        const on = l===status;
+        const color = l==="red"?C.red:l==="amber"?C.amber:C.green;
+        return <div key={l} style={{width:26,height:26,borderRadius:"50%",background:on?color:"#20242A",boxShadow:on?`0 0 14px 3px ${color}99, inset 0 0 4px rgba(255,255,255,.4)`:"inset 0 0 3px rgba(0,0,0,.6)",transition:"all .3s ease"}}/>;
+      })}
+    </div>
+  );
+}
+
+function Lightbox({src, onClose}) {
+  if (!src) return null;
+  return (
+    <div onClick={onClose} className="ft-fade" style={{position:"fixed",inset:0,background:"rgba(10,12,13,.9)",zIndex:60,display:"flex",alignItems:"center",justifyContent:"center",padding:20,cursor:"zoom-out"}}>
+      <img src={src} alt="หลักฐาน" style={{maxWidth:"92vw",maxHeight:"88vh",borderRadius:10,border:`1px solid ${C.line}`}}/>
+      <button onClick={onClose} style={{position:"absolute",top:18,right:18,background:C.panel,border:`1px solid ${C.line}`,borderRadius:999,padding:8,color:C.text}}><Icon.x/></button>
+    </div>
+  );
+}
+
+const inputStyle = {width:"100%",background:C.panel2,border:`1px solid ${C.line}`,borderRadius:10,padding:"10px 12px",color:C.text,fontSize:14,outline:"none",boxSizing:"border-box"};
+
+function Field({label, children}) {
+  return <div><div style={{fontSize:12.5,color:C.sub,marginBottom:6}}>{label}</div>{children}</div>;
+}
+
+function TxForm({type, onCancel, onSubmit}) {
+  const isIn = type==="in";
+  const [amount,setAmount]=useState(""); const [reason,setReason]=useState("");
+  const [who,setWho]=useState(""); const [file,setFile]=useState(null);
+  const [preview,setPreview]=useState(null); const [busy,setBusy]=useState(false); const [err,setErr]=useState("");
+
+  const handleFile = async (f) => {
+    if (!f) return;
+    setFile(f);
+    try {
+      const blob = await fileToCompressedDataUrl(f);
+      setPreview(URL.createObjectURL(blob));
+      setFile(blob);
+    } catch { setErr("ไม่สามารถอ่านรูปได้ ลองไฟล์อื่น"); }
+  };
+
+  const submit = async () => {
+    setErr("");
+    const amt = parseFloat(amount);
+    if (!amt || amt<=0) return setErr("กรอกจำนวนเงินให้ถูกต้อง");
+    if (!who.trim()) return setErr("กรอกชื่อผู้ทำรายการ");
+    if (!reason.trim()) return setErr("กรอกเหตุผล / รายละเอียด");
+    if (!isIn && !file) return setErr("รายการเงินออกต้องแนบรูปหลักฐาน");
+    setBusy(true);
+    try { await onSubmit({amount:amt, reason:reason.trim(), who:who.trim(), imageBlob:file}); }
+    catch(e) { setErr("บันทึกไม่สำเร็จ: " + (e.message||"")); }
+    finally { setBusy(false); }
+  };
+
+  const accent = isIn?C.green:C.red;
+
+  return (
+    <div className="ft-fade" style={{background:C.panel,border:`1px solid ${C.line}`,borderRadius:16,padding:18,marginBottom:18}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:10,height:10,borderRadius:"50%",background:accent,boxShadow:`0 0 8px ${accent}`}}/>
+          <span className="ft-display" style={{fontSize:16,fontWeight:700}}>{isIn?"บันทึกเงินเข้า":"บันทึกเงินออก"}</span>
+        </div>
+        <button onClick={onCancel} style={{color:C.sub,background:"none",border:"none",cursor:"pointer"}}><Icon.x/></button>
+      </div>
+      <div style={{display:"grid",gap:12}}>
+        <Field label="จำนวนเงิน (บาท)">
+          <input type="number" inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0.00" className="ft-mono" style={inputStyle}/>
+        </Field>
+        <Field label="ชื่อผู้ทำรายการ">
+          <input value={who} onChange={e=>setWho(e.target.value)} placeholder="ชื่อสมาชิก" style={inputStyle}/>
+        </Field>
+        <Field label={isIn?"แหล่งที่มา / เหตุผล":"เหตุผลการใช้จ่าย"}>
+          <textarea value={reason} onChange={e=>setReason(e.target.value)} rows={3}
+            placeholder={isIn?"เช่น เงินสมทบจากสมาชิก, ทุนสนับสนุนโครงการ":"เช่น ซื้อเซนเซอร์ตรวจจับรถ, ค่าปริ้นรายงาน"}
+            style={{...inputStyle,resize:"vertical"}}/>
+        </Field>
+        <Field label={isIn?"รูปหลักฐาน (ถ้ามี)":"รูปหลักฐาน (จำเป็น)"}>
+          <label style={{display:"flex",alignItems:"center",gap:10,border:`1px dashed ${C.line}`,borderRadius:10,padding:"10px 12px",cursor:"pointer",color:C.sub,background:C.panel2}}>
+            <Icon.img/>
+            <span style={{fontSize:13}}>{file? "เลือกรูปแล้ว":"แตะเพื่อเลือกรูป / ถ่ายภาพสลิป"}</span>
+            <input type="file" accept="image/*" capture="environment" onChange={e=>handleFile(e.target.files?.[0])} style={{display:"none"}}/>
+          </label>
+          {preview && <img src={preview} alt="preview" style={{marginTop:10,maxHeight:160,borderRadius:8,border:`1px solid ${C.line}`}}/>}
+        </Field>
+        {err && <div style={{color:C.red,fontSize:13,background:C.redDim,padding:"8px 10px",borderRadius:8}}>{err}</div>}
+        <div style={{display:"flex",gap:10,marginTop:4}}>
+          <button onClick={submit} disabled={busy} className="ft-display"
+            style={{flex:1,background:accent,color:"#0E1112",fontWeight:700,border:"none",borderRadius:10,padding:"11px 14px",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            {busy?"กำลังบันทึก...":"บันทึกรายการ"}
+          </button>
+          <button onClick={onCancel} style={{background:"transparent",color:C.sub,border:`1px solid ${C.line}`,borderRadius:10,padding:"11px 16px",cursor:"pointer"}}>ยกเลิก</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TxRow({tx, onOpenImage, onDelete}) {
+  const isIn = tx.type==="in";
+  return (
+    <div className="ft-fade" style={{display:"flex",alignItems:"flex-start",gap:12,padding:"12px 14px",borderLeft:`3px solid ${isIn?C.green:C.red}`,background:C.panel,borderRadius:10,marginBottom:8}}>
+      <div style={{marginTop:2}}>{isIn? <Icon.in/> : <Icon.out/>}</div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+          <span style={{fontWeight:600,fontSize:14.5}}>{tx.reason}</span>
+          <span className="ft-mono" style={{fontWeight:700,fontSize:15,color:isIn?C.green:C.red,whiteSpace:"nowrap"}}>{isIn?"+":"−"}฿{money(tx.amount)}</span>
+        </div>
+        <div style={{fontSize:12.5,color:C.sub,marginTop:4}}>{tx.who} · {fmtDate(tx.created_at)}</div>
+        <div style={{display:"flex",gap:10,marginTop:8}}>
+          {tx.image_path && (
+            <button onClick={()=>onOpenImage(tx.image_path)} style={{fontSize:12,color:C.amber,background:C.amberDim,border:"none",borderRadius:6,padding:"4px 9px",cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>
+              <Icon.img/> ดูหลักฐาน
+            </button>
+          )}
+          <button onClick={()=>onDelete(tx)} style={{fontSize:12,color:C.sub,background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>
+            <Icon.trash/> ลบ
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PinGate({onUnlock}) {
+  const [val,setVal]=useState(""); const [err,setErr]=useState(false);
+  const submit = () => {
+    if (val === window.GROUP_PIN) { localStorage.setItem("ft_pin_ok","1"); onUnlock(); }
+    else setErr(true);
+  };
+  return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div className="ft-fade" style={{background:C.panel,border:`1px solid ${C.line}`,borderRadius:16,padding:24,width:"100%",maxWidth:320,textAlign:"center"}}>
+        <div className="ft-display" style={{fontSize:16,fontWeight:700,marginBottom:14}}>รหัสผ่านกลุ่ม</div>
+        <input type="password" value={val} onChange={e=>{setVal(e.target.value); setErr(false);}} onKeyDown={e=>e.key==="Enter"&&submit()}
+          style={{...inputStyle,textAlign:"center",marginBottom:10}} placeholder="กรอกรหัส"/>
+        {err && <div style={{color:C.red,fontSize:12.5,marginBottom:10}}>รหัสไม่ถูกต้อง</div>}
+        <button onClick={submit} className="ft-display" style={{width:"100%",background:C.amber,color:"#0E1112",fontWeight:700,border:"none",borderRadius:10,padding:"10px 14px",cursor:"pointer"}}>เข้าใช้งาน</button>
+      </div>
+    </div>
+  );
+}
+
+const STORAGE_KEY_CFG_OK = window.SUPABASE_URL && !window.SUPABASE_URL.includes("YOUR-PROJECT");
+
+function App() {
+  const [unlocked, setUnlocked] = useState(!window.GROUP_PIN || localStorage.getItem("ft_pin_ok")==="1");
+  const [txs, setTxs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [formType, setFormType] = useState(null);
+  const [filter, setFilter] = useState("all");
+  const [lightboxSrc, setLightboxSrc] = useState(null);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await sb.from(TABLE).select("*").order("created_at", {ascending:false});
+    if (error) setError("โหลดข้อมูลไม่สำเร็จ: " + error.message);
+    else { setTxs(data||[]); setError(""); }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (!unlocked || !STORAGE_KEY_CFG_OK) return;
+    load();
+    const channel = sb.channel("tx-changes")
+      .on("postgres_changes", {event:"*", schema:"public", table:TABLE}, () => load())
+      .subscribe();
+    return () => sb.removeChannel(channel);
+  }, [unlocked, load]);
+
+  const addTx = async ({amount, reason, who, imageBlob}) => {
+    let image_path = null;
+    if (imageBlob) {
+      const path = `${formType}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.jpg`;
+      const { error: upErr } = await sb.storage.from(BUCKET).upload(path, imageBlob, {contentType:"image/jpeg"});
+      if (upErr) throw upErr;
+      image_path = path;
+    }
+    const { error: insErr } = await sb.from(TABLE).insert({type:formType, amount, reason, who, image_path});
+    if (insErr) throw insErr;
+    setFormType(null);
+    load();
+  };
+
+  const deleteTx = async (tx) => {
+    if (!window.confirm("ลบรายการนี้ใช่ไหม? ไม่สามารถกู้คืนได้")) return;
+    if (tx.image_path) await sb.storage.from(BUCKET).remove([tx.image_path]).catch(()=>{});
+    await sb.from(TABLE).delete().eq("id", tx.id);
+    load();
+  };
+
+  const openImage = (path) => {
+    const { data } = sb.storage.from(BUCKET).getPublicUrl(path);
+    setLightboxSrc(data.publicUrl);
+  };
+
+  const totalIn = txs.filter(t=>t.type==="in").reduce((s,t)=>s+Number(t.amount),0);
+  const totalOut = txs.filter(t=>t.type==="out").reduce((s,t)=>s+Number(t.amount),0);
+  const balance = totalIn - totalOut;
+  const signal = balance<=0 ? "red" : balance < totalIn*0.15 ? "amber" : "green";
+  const filtered = txs.filter(t=>filter==="all"||t.type===filter);
+
+  if (!STORAGE_KEY_CFG_OK) {
+    return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:24,textAlign:"center",color:C.sub}}>
+      ยังไม่ได้ตั้งค่า Supabase — แก้ SUPABASE_URL และ SUPABASE_ANON_KEY ในไฟล์ index.html ก่อนใช้งาน
+    </div>;
+  }
+  if (!unlocked) return <PinGate onUnlock={()=>setUnlocked(true)}/>;
+
+  return (
+    <div style={{minHeight:"100vh",background:C.bg,color:C.text,paddingBottom:60}}>
+      <div style={{borderBottom:`1px solid ${C.line}`,background:"linear-gradient(180deg,#181B1E,#15181B)"}}>
+        <div style={{maxWidth:720,margin:"0 auto",padding:"24px 18px 20px"}}>
+          <div style={{fontSize:12,letterSpacing:1.5,color:C.sub,textTransform:"uppercase",marginBottom:4}}>กองทุนโครงการ</div>
+          <h1 className="ft-display" style={{fontSize:22,fontWeight:700,margin:"0 0 18px",lineHeight:1.35}}>
+            Smart Control of Traffic Light System<br/>using Artificial Intelligence
+          </h1>
+          <div style={{display:"flex",alignItems:"center",gap:16}}>
+            <SignalStack status={signal}/>
+            <div style={{flex:1}}>
+              <div style={{fontSize:12,color:C.sub,marginBottom:2}}>ยอดคงเหลือปัจจุบัน</div>
+              <div className="ft-mono" style={{fontSize:34,fontWeight:700,color:signal==="red"?C.red:signal==="amber"?C.amber:C.green,lineHeight:1.1}}>฿{money(balance)}</div>
+              <div style={{display:"flex",gap:16,marginTop:8,fontSize:12.5}}>
+                <span style={{color:C.green}}>▲ เข้า ฿{money(totalIn)}</span>
+                <span style={{color:C.red}}>▼ ออก ฿{money(totalOut)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{maxWidth:720,margin:"0 auto",padding:18}}>
+        {!formType && (
+          <div style={{display:"flex",gap:10,marginBottom:18}}>
+            <button onClick={()=>setFormType("in")} className="ft-display" style={{flex:1,background:C.greenDim,color:C.green,border:`1px solid ${C.green}44`,borderRadius:12,padding:"13px 10px",fontWeight:700,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}><Icon.plus/> เงินเข้า</button>
+            <button onClick={()=>setFormType("out")} className="ft-display" style={{flex:1,background:C.redDim,color:C.red,border:`1px solid ${C.red}44`,borderRadius:12,padding:"13px 10px",fontWeight:700,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}><Icon.plus/> เงินออก</button>
+          </div>
+        )}
+
+        {formType && <TxForm type={formType} onCancel={()=>setFormType(null)} onSubmit={addTx}/>}
+        {error && <div style={{background:C.redDim,color:C.red,padding:"10px 12px",borderRadius:10,fontSize:13,marginBottom:14}}>{error}</div>}
+
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+          <div style={{display:"flex",gap:6}}>
+            {[["all","ทั้งหมด"],["in","เข้า"],["out","ออก"]].map(([v,l])=>(
+              <button key={v} onClick={()=>setFilter(v)} style={{fontSize:12.5,padding:"6px 12px",borderRadius:999,cursor:"pointer",border:`1px solid ${filter===v?C.amber:C.line}`,background:filter===v?C.amberDim:"transparent",color:filter===v?C.amber:C.sub}}>{l}</button>
+            ))}
+          </div>
+          <button onClick={load} style={{display:"flex",alignItems:"center",gap:6,fontSize:11.5,color:C.sub,background:"none",border:"none",cursor:"pointer"}}>
+            <Icon.refresh className={loading?"ft-pulse":""}/> รีเฟรช
+          </button>
+        </div>
+
+        {loading && txs.length===0 ? (
+          <div style={{textAlign:"center",padding:"40px 0",color:C.sub,fontSize:13}}>กำลังโหลดรายการ...</div>
+        ) : filtered.length===0 ? (
+          <div style={{textAlign:"center",padding:"50px 20px",color:C.sub,fontSize:13.5,border:`1px dashed ${C.line}`,borderRadius:14}}>
+            ยังไม่มีรายการ — กดปุ่ม "เงินเข้า" หรือ "เงินออก" ด้านบนเพื่อเริ่มบันทึก
+          </div>
+        ) : (
+          <div>{filtered.map(tx => <TxRow key={tx.id} tx={tx} onOpenImage={openImage} onDelete={deleteTx}/>)}</div>
+        )}
+
+        <div style={{textAlign:"center",fontSize:11,color:C.sub,marginTop:24}}>อัปเดตแบบเรียลไทม์ให้สมาชิกทุกคนเห็นข้อมูลตรงกัน</div>
+      </div>
+      <Lightbox src={lightboxSrc} onClose={()=>setLightboxSrc(null)}/>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
